@@ -49,13 +49,7 @@ const doctorSchema = new mongoose.Schema({
   phone: {
     type: String,
     required: true
-  },
-  prescriptionTemplates: [{
-    name: String,
-    symptoms: String,
-    prescription: String,
-    followUpDays: Number
-  }]
+  }
 }, {
   timestamps: true
 });
