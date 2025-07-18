@@ -108,6 +108,33 @@ router.post('/signature', auth, upload.single('signature'), async (req, res) => 
   }
 });
 
+// Delete digital signature
+router.delete('/signature', auth, async (req, res) => {
+  try {
+    const doctor = await Doctor.findById(req.doctor._id);
+    
+    if (!doctor.digitalSignature) {
+      return res.status(404).json({ message: 'No digital signature found' });
+    }
+
+    // Delete signature file if exists
+    const fs = require('fs');
+    if (fs.existsSync(doctor.digitalSignature)) {
+      fs.unlinkSync(doctor.digitalSignature);
+    }
+
+    doctor.digitalSignature = null;
+    await doctor.save();
+
+    res.json({
+      message: 'Digital signature deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete signature error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get prescription templates
 router.get('/templates', auth, async (req, res) => {
   try {

@@ -20,6 +20,7 @@ app.use(helmet({
       "img-src": ["'self'", "data:", "https:", "http:"],
     },
   },
+  crossOriginResourcePolicy: false, // Disable global CORP to allow custom headers
 }));
 app.use(cors());
 
@@ -39,9 +40,19 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Static files for uploads
 app.use('/uploads', (req, res, next) => {
+  // Set comprehensive CORS headers for images
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
   next();
 }, express.static('uploads'));
 

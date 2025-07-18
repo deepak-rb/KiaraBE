@@ -48,7 +48,9 @@ router.post('/register', async (req, res) => {
         name: doctor.name,
         email: doctor.email,
         specialization: doctor.specialization,
-        clinicName: doctor.clinicName
+        clinicName: doctor.clinicName,
+        clinicAddress: doctor.clinicAddress,
+        phone: doctor.phone
       }
     });
   } catch (error) {
@@ -99,6 +101,8 @@ router.post('/login', async (req, res) => {
         email: doctor.email,
         specialization: doctor.specialization,
         clinicName: doctor.clinicName,
+        clinicAddress: doctor.clinicAddress,
+        phone: doctor.phone,
         digitalSignature: doctor.digitalSignature
       }
     });
@@ -119,6 +123,8 @@ router.get('/me', auth, async (req, res) => {
         email: req.doctor.email,
         specialization: req.doctor.specialization,
         clinicName: req.doctor.clinicName,
+        clinicAddress: req.doctor.clinicAddress,
+        phone: req.doctor.phone,
         digitalSignature: req.doctor.digitalSignature
       }
     });
