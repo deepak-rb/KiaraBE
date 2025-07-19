@@ -238,6 +238,10 @@ router.get('/export-data', auth, async (req, res) => {
 
 // Import and restore data (Danger Zone)
 router.post('/import-data', auth, async (req, res) => {
+  console.log('=== IMPORT ROUTE HIT ===');
+  console.log('Request body keys:', Object.keys(req.body));
+  console.log('Request body data keys:', req.body.data ? Object.keys(req.body.data) : 'NO DATA');
+  
   try {
     const { data } = req.body;
 
@@ -245,28 +249,313 @@ router.post('/import-data', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid data format' });
     }
 
-    // Clear existing data
+    console.log('Starting import process...');
+    console.log('Data counts:', {
+      doctors: data.doctors.length,
+      patients: data.patients.length,
+      prescriptions: data.prescriptions.length
+    });
+
+    // Step 1: Backup existing data before clearing
+    console.log('Creating backup of existing data...');
+    const existingDoctors = await Doctor.find({});
+    const existingPatients = await Patient.find({});
+    const existingPrescriptions = await Prescription.find({});
+    
+    console.log('Backup created with counts:', {
+      doctors: existingDoctors.length,
+      patients: existingPatients.length,
+      prescriptions: existingPrescriptions.length
+    });
+
+    // Step 2: Process and validate imported data
+    console.log('Processing and validating import data...');
+    
+    // Process doctor data - remove _id, __v and reset digitalSignature fields to null
+    const processedDoctors = data.doctors.map(doctor => {
+      const { _id, __v, createdAt, updatedAt, ...cleanDoctor } = doctor;
+      return {
+        ...cleanDoctor,
+        password: 'TempPassword123!', // Set a temporary password for imported doctors
+        digitalSignature: null // Reset digitalSignature field to null during import
+      };
+    });
+
+    // Process patient data - remove _id, __v and reset photo fields to null
+    const processedPatients = data.patients.map(patient => {
+      const { _id, __v, createdAt, updatedAt, ...cleanPatient } = patient;
+      return {
+        ...cleanPatient,
+        photo: null // Reset photo field to null during import
+      };
+    });
+
+    // Process prescription data - remove _id, __v and reset digitalSignature fields to null
+    const processedPrescriptions = data.prescriptions.map(prescription => {
+      const { _id, __v, createdAt, updatedAt, ...cleanPrescription } = prescription;
+      return {
+        ...cleanPrescription,
+        digitalSignature: null // Reset digitalSignature field to null during import
+      };
+    });
+
+    console.log('Processed data counts:', {
+      doctors: processedDoctors.length,
+      patients: processedPatients.length,
+      prescriptions: processedPrescriptions.length
+    });
+
+    // Log a sample of processed data for debugging
+    if (processedDoctors.length > 0) {
+      console.log('Sample processed doctor:', JSON.stringify(processedDoctors[0], null, 2));
+    }
+    if (processedPatients.length > 0) {
+      console.log('Sample processed patient:', JSON.stringify(processedPatients[0], null, 2));
+    }
+    if (processedPrescriptions.length > 0) {
+      console.log('Sample processed prescription:', JSON.stringify(processedPrescriptions[0], null, 2));
+    }
+
+    // Step 3: Validate data before import by testing with mongoose validation
+    console.log('Validating data structure...');
+    
+    try {
+      // Test validation on a few sample documents
+      if (processedDoctors.length > 0) {
+        console.log('Testing doctor validation with sample:', JSON.stringify(processedDoctors[0], null, 2));
+        const testDoctor = new Doctor(processedDoctors[0]);
+        // Skip password hashing for validation test
+        testDoctor.isModified = () => false;
+        await testDoctor.validate();
+        console.log('Doctor data validation passed');
+      }
+      
+      if (processedPatients.length > 0) {
+        // For patient validation, we need a valid doctor ID
+        let testPatientData = { ...processedPatients[0] };
+        if (processedDoctors.length > 0) {
+          // Create a temporary doctor to get a valid ObjectId
+          const tempDoctor = new Doctor(processedDoctors[0]);
+          testPatientData.doctorId = tempDoctor._id;
+        }
+        console.log('Testing patient validation with sample:', JSON.stringify(testPatientData, null, 2));
+        const testPatient = new Patient(testPatientData);
+        await testPatient.validate();
+        console.log('Patient data validation passed');
+      }
+      
+      if (processedPrescriptions.length > 0) {
+        // For prescription validation, we need valid doctor and patient IDs
+        let testPrescriptionData = { ...processedPrescriptions[0] };
+        if (processedDoctors.length > 0) {
+          const tempDoctor = new Doctor(processedDoctors[0]);
+          testPrescriptionData.doctorId = tempDoctor._id;
+        }
+        if (processedPatients.length > 0) {
+          const tempPatient = new Patient(processedPatients[0]);
+          testPrescriptionData.patientId = tempPatient._id;
+        }
+        console.log('Testing prescription validation with sample:', JSON.stringify(testPrescriptionData, null, 2));
+        const testPrescription = new Prescription(testPrescriptionData);
+        await testPrescription.validate();
+        console.log('Prescription data validation passed');
+      }
+    } catch (validationError) {
+      console.error('Data validation failed:', validationError);
+      console.error('Validation error details:', {
+        message: validationError.message,
+        name: validationError.name,
+        errors: validationError.errors,
+        stack: validationError.stack
+      });
+      return res.status(400).json({ 
+        message: `Data validation failed: ${validationError.message}`,
+        details: 'The imported data does not match the expected format or is missing required fields',
+        validationErrors: validationError.errors || validationError.message
+      });
+    }
+
+    // Step 4: Clear existing data only after validation passes
+    console.log('Validation passed, clearing existing data...');
     await Doctor.deleteMany({});
     await Patient.deleteMany({});
     await Prescription.deleteMany({});
+    console.log('Existing data cleared');
 
-    // Import new data
-    const importedDoctors = await Doctor.insertMany(data.doctors);
-    const importedPatients = await Patient.insertMany(data.patients);
-    const importedPrescriptions = await Prescription.insertMany(data.prescriptions);
+    // Step 5: Import new data with error handling and rollback capability
+    console.log('Starting data import...');
+    let importedDoctors = [];
+    let importedPatients = [];
+    let importedPrescriptions = [];
+    let importSuccess = true;
+    let errorMessage = '';
+    let doctorIdMapping = {}; // Map old doctor IDs to new ones
 
-    res.json({
-      message: 'Data imported successfully',
-      imported: {
-        doctors: importedDoctors.length,
-        patients: importedPatients.length,
-        prescriptions: importedPrescriptions.length,
-        total: importedDoctors.length + importedPatients.length + importedPrescriptions.length
+    try {
+      // Import doctors first
+      if (processedDoctors.length > 0) {
+        console.log(`Importing ${processedDoctors.length} doctors...`);
+        console.log('First doctor sample:', JSON.stringify(processedDoctors[0], null, 2));
+        importedDoctors = await Doctor.insertMany(processedDoctors, { ordered: false });
+        console.log(`✓ Successfully imported ${importedDoctors.length} doctors`);
+        
+        // Create mapping from old doctor IDs to new ones
+        data.doctors.forEach((originalDoctor, index) => {
+          if (originalDoctor._id && importedDoctors[index]) {
+            doctorIdMapping[originalDoctor._id] = importedDoctors[index]._id;
+          }
+        });
+        console.log('Doctor ID mapping created:', doctorIdMapping);
       }
-    });
+
+      // Import patients with updated doctor IDs
+      if (processedPatients.length > 0) {
+        console.log(`Importing ${processedPatients.length} patients...`);
+        
+        // Update patient doctorId references
+        const patientsWithUpdatedDoctorIds = processedPatients.map(patient => {
+          if (patient.doctorId && doctorIdMapping[patient.doctorId]) {
+            return {
+              ...patient,
+              doctorId: doctorIdMapping[patient.doctorId]
+            };
+          } else if (importedDoctors.length > 0) {
+            // If no mapping found, assign to first imported doctor
+            return {
+              ...patient,
+              doctorId: importedDoctors[0]._id
+            };
+          }
+          return patient;
+        });
+        
+        console.log('First patient sample with updated doctorId:', JSON.stringify(patientsWithUpdatedDoctorIds[0], null, 2));
+        importedPatients = await Patient.insertMany(patientsWithUpdatedDoctorIds, { ordered: false });
+        console.log(`✓ Successfully imported ${importedPatients.length} patients`);
+      }
+
+      // Import prescriptions with updated doctor and patient IDs
+      if (processedPrescriptions.length > 0) {
+        console.log(`Importing ${processedPrescriptions.length} prescriptions...`);
+        
+        // Create patient ID mapping
+        let patientIdMapping = {};
+        data.patients.forEach((originalPatient, index) => {
+          if (originalPatient._id && importedPatients[index]) {
+            patientIdMapping[originalPatient._id] = importedPatients[index]._id;
+          }
+        });
+        
+        // Update prescription references
+        const prescriptionsWithUpdatedIds = processedPrescriptions.map(prescription => {
+          let updatedPrescription = { ...prescription };
+          
+          if (prescription.doctorId && doctorIdMapping[prescription.doctorId]) {
+            updatedPrescription.doctorId = doctorIdMapping[prescription.doctorId];
+          } else if (importedDoctors.length > 0) {
+            updatedPrescription.doctorId = importedDoctors[0]._id;
+          }
+          
+          if (prescription.patientId && patientIdMapping[prescription.patientId]) {
+            updatedPrescription.patientId = patientIdMapping[prescription.patientId];
+          } else if (importedPatients.length > 0) {
+            updatedPrescription.patientId = importedPatients[0]._id;
+          }
+          
+          return updatedPrescription;
+        });
+        
+        console.log('First prescription sample with updated IDs:', JSON.stringify(prescriptionsWithUpdatedIds[0], null, 2));
+        importedPrescriptions = await Prescription.insertMany(prescriptionsWithUpdatedIds, { ordered: false });
+        console.log(`✓ Successfully imported ${importedPrescriptions.length} prescriptions`);
+      }
+
+    } catch (importError) {
+      console.error('Import failed:', importError);
+      console.error('Import error details:', {
+        message: importError.message,
+        name: importError.name,
+        code: importError.code,
+        stack: importError.stack
+      });
+      importSuccess = false;
+      errorMessage = importError.message;
+
+      // Step 6: Rollback - restore original data if import fails
+      console.log('Import failed, attempting rollback...');
+      try {
+        // Clear any partially imported data
+        await Doctor.deleteMany({});
+        await Patient.deleteMany({});
+        await Prescription.deleteMany({});
+
+        // Restore original data
+        if (existingDoctors.length > 0) {
+          await Doctor.insertMany(existingDoctors);
+          console.log(`Restored ${existingDoctors.length} doctors`);
+        }
+        if (existingPatients.length > 0) {
+          await Patient.insertMany(existingPatients);
+          console.log(`Restored ${existingPatients.length} patients`);
+        }
+        if (existingPrescriptions.length > 0) {
+          await Prescription.insertMany(existingPrescriptions);
+          console.log(`Restored ${existingPrescriptions.length} prescriptions`);
+        }
+
+        console.log('Rollback completed successfully');
+        return res.status(500).json({ 
+          message: `Import failed and data was restored to previous state: ${errorMessage}`,
+          rollback: true
+        });
+      } catch (rollbackError) {
+        console.error('Rollback failed:', rollbackError);
+        return res.status(500).json({ 
+          message: `Import failed and rollback also failed. Database may be in inconsistent state: ${errorMessage}`,
+          rollback: false,
+          critical: true
+        });
+      }
+    }
+
+    if (importSuccess) {
+      console.log('Import completed successfully');
+      
+      // Verify final counts
+      const finalCounts = {
+        doctors: await Doctor.countDocuments(),
+        patients: await Patient.countDocuments(),
+        prescriptions: await Prescription.countDocuments()
+      };
+      
+      console.log('Final database counts:', finalCounts);
+
+      // Check if we actually imported anything
+      const totalImported = importedDoctors.length + importedPatients.length + importedPrescriptions.length;
+      if (totalImported === 0) {
+        console.log('WARNING: No data was imported even though import was successful');
+        console.log('This might indicate validation or processing issues');
+      }
+
+      res.json({
+        message: 'Data imported successfully. Note: All imported doctors have been assigned the temporary password "TempPassword123!" and should change it immediately.',
+        imported: {
+          doctors: importedDoctors.length,
+          patients: importedPatients.length,
+          prescriptions: importedPrescriptions.length,
+          total: importedDoctors.length + importedPatients.length + importedPrescriptions.length
+        },
+        verified: finalCounts,
+        warning: 'Imported doctors have temporary passwords and should change them immediately for security.'
+      });
+    } else {
+      console.log('Import failed but no error was thrown - this should not happen');
+      res.status(500).json({ message: 'Import failed due to unknown error' });
+    }
+
   } catch (error) {
     console.error('Import data error:', error);
-    res.status(500).json({ message: 'Failed to import data' });
+    res.status(500).json({ message: `Failed to import data: ${error.message}` });
   }
 });
 
