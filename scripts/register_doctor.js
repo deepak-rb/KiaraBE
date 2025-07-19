@@ -3,15 +3,15 @@ const axios = require('axios');
 async function registerDoctor() {
   try {
     const response = await axios.post('http://localhost:5000/api/auth/register', {
-      username: 'deepak',
-      email: 'deepak@gmail.com',
-      password: 'deepak123',
-      name: 'Dr. Deepak',
-      specialization: 'General Medicine',
-      licenseNumber: 'MED001234',
-      phone: '+1234567890',
-      clinicName: 'Deepak Medical Clinic',
-      clinicAddress: '123 Health Street, Medical City'
+      username: 'bipincysp',
+      email: 'bipincyalen1993@gmail.com',
+      password: 'Bipincy@123',
+      name: 'Bipincy S P',
+      specialization: 'Homeopathic Consultant',
+      licenseNumber: 'Reg No: 11841',
+      phone: '8281704219',
+      clinicName: 'Kiara Homeopathic Speciality Clinic',
+      clinicAddress: 'Kannaravila Pin:695524'
     });
     
     console.log('Doctor registered successfully!');

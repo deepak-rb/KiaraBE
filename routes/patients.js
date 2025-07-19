@@ -40,22 +40,35 @@ const upload = multer({
   }
 });
 
-// Generate unique patient ID
+// Generate unique patient ID starting from P1000
 const generatePatientId = async () => {
-  const date = new Date();
-  const year = date.getFullYear().toString().slice(-2);
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  // Find the highest existing patient ID that follows the P{number} format
+  const lastPatient = await Patient.findOne(
+    { patientId: { $regex: /^P\d+$/ } },
+    {},
+    { sort: { patientId: -1 } }
+  );
   
-  let counter = 1;
+  let nextNumber = 1000; // Start from P1000 by default
+  
+  if (lastPatient && lastPatient.patientId) {
+    // Extract the number from the last patient ID (e.g., "P1005" -> 1005)
+    const lastNumber = parseInt(lastPatient.patientId.substring(1));
+    if (!isNaN(lastNumber)) {
+      nextNumber = Math.max(lastNumber + 1, 1000); // Ensure we don't go below P1000
+    }
+  }
+  
   let patientId;
+  let attempts = 0;
   
   do {
-    const counterStr = counter.toString().padStart(4, '0');
-    patientId = `P${year}${month}${counterStr}`;
+    patientId = `P${nextNumber}`;
     const existingPatient = await Patient.findOne({ patientId });
     if (!existingPatient) break;
-    counter++;
-  } while (counter < 10000);
+    nextNumber++;
+    attempts++;
+  } while (attempts < 10000); // Safety limit
   
   return patientId;
 };

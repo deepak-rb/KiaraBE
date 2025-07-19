@@ -92,7 +92,7 @@ router.post('/', auth, async (req, res) => {
     await newPrescription.save();
 
     // Populate doctor and patient details for response
-    await newPrescription.populate('doctorId', 'name specialization clinicName clinicAddress');
+    await newPrescription.populate('doctorId', 'name specialization licenseNumber clinicName clinicAddress');
     await newPrescription.populate('patientId', 'name age phone address');
 
     res.status(201).json({
@@ -146,7 +146,7 @@ router.get('/patient/:patientId', auth, async (req, res) => {
       patientId: patientId,
       doctorId: req.doctor._id
     })
-    .populate('doctorId', 'name specialization clinicName clinicAddress')
+    .populate('doctorId', 'name specialization licenseNumber clinicName clinicAddress')
     .sort({ createdAt: -1 });
 
     res.json({ 
@@ -208,7 +208,7 @@ router.get('/:id', auth, async (req, res) => {
       doctorId: req.doctor._id
     })
     .populate('patientId', 'name age phone patientId address photo')
-    .populate('doctorId', 'name specialization clinicName clinicAddress phone');
+    .populate('doctorId', 'name specialization licenseNumber clinicName clinicAddress phone');
 
     if (!prescription) {
       return res.status(404).json({ message: 'Prescription not found' });
@@ -257,7 +257,7 @@ router.put('/:id', auth, async (req, res) => {
     await prescriptionDoc.save();
 
     await prescriptionDoc.populate('patientId', 'name age phone patientId');
-    await prescriptionDoc.populate('doctorId', 'name specialization clinicName clinicAddress');
+    await prescriptionDoc.populate('doctorId', 'name specialization licenseNumber clinicName clinicAddress');
 
     res.json({
       message: 'Prescription updated successfully',

@@ -1,6 +1,8 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const Doctor = require('../models/Doctor');
+const Patient = require('../models/Patient');
+const Prescription = require('../models/Prescription');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -48,6 +50,7 @@ router.post('/register', async (req, res) => {
         name: doctor.name,
         email: doctor.email,
         specialization: doctor.specialization,
+        licenseNumber: doctor.licenseNumber,
         clinicName: doctor.clinicName,
         clinicAddress: doctor.clinicAddress,
         phone: doctor.phone
@@ -100,6 +103,7 @@ router.post('/login', async (req, res) => {
         name: doctor.name,
         email: doctor.email,
         specialization: doctor.specialization,
+        licenseNumber: doctor.licenseNumber,
         clinicName: doctor.clinicName,
         clinicAddress: doctor.clinicAddress,
         phone: doctor.phone,
@@ -122,6 +126,7 @@ router.get('/me', auth, async (req, res) => {
         name: req.doctor.name,
         email: req.doctor.email,
         specialization: req.doctor.specialization,
+        licenseNumber: req.doctor.licenseNumber,
         clinicName: req.doctor.clinicName,
         clinicAddress: req.doctor.clinicAddress,
         phone: req.doctor.phone,
@@ -156,93 +161,6 @@ router.post('/danger-zone-auth', async (req, res) => {
   }
 });
 
-// Get all users (Danger Zone)
-router.get('/all-users', auth, async (req, res) => {
-  try {
-    const users = await Doctor.find({}, '-password');
-    res.json({ users });
-  } catch (error) {
-    console.error('Get all users error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Create new user (Danger Zone)
-router.post('/create-user', auth, async (req, res) => {
-  try {
-    const { username, password, name, email, specialization, clinicName, clinicAddress, phone } = req.body;
-
-    // Check if user already exists
-    const existingUser = await Doctor.findOne({ 
-      $or: [{ username }, { email }] 
-    });
-
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists with this username or email' });
-    }
-
-    const newUser = new Doctor({
-      username,
-      password,
-      name,
-      email,
-      specialization: specialization || 'General',
-      clinicName: clinicName || 'Default Clinic',
-      clinicAddress: clinicAddress || '',
-      phone: phone || '',
-      licenseNumber: `LIC-${Date.now()}` // Auto-generate license number
-    });
-
-    await newUser.save();
-
-    res.status(201).json({
-      message: 'User created successfully',
-      user: {
-        id: newUser._id,
-        username: newUser.username,
-        name: newUser.name,
-        email: newUser.email,
-        specialization: newUser.specialization,
-        clinicName: newUser.clinicName,
-        clinicAddress: newUser.clinicAddress,
-        phone: newUser.phone
-      }
-    });
-  } catch (error) {
-    console.error('Create user error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// Delete user (Danger Zone)
-router.delete('/delete-user/:id', auth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    // Prevent deleting self
-    if (id === req.doctor._id.toString()) {
-      return res.status(400).json({ message: 'Cannot delete your own account' });
-    }
-
-    // Check total user count before deletion
-    const totalUsers = await Doctor.countDocuments();
-    if (totalUsers <= 1) {
-      return res.status(400).json({ message: 'Cannot delete the last user in the system' });
-    }
-
-    const deletedUser = await Doctor.findByIdAndDelete(id);
-    
-    if (!deletedUser) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.json({ message: 'User deleted successfully' });
-  } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
 // Change password (Danger Zone)
 router.post('/change-password', auth, async (req, res) => {
   try {
@@ -265,51 +183,90 @@ router.post('/change-password', auth, async (req, res) => {
   }
 });
 
-// Edit user (Danger Zone)
-router.put('/edit-user/:id', auth, async (req, res) => {
+// Get data counts (Danger Zone)
+router.get('/data-counts', auth, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, email, specialization, clinicName, clinicAddress, phone } = req.body;
-    
-    const user = await Doctor.findById(id);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Check if email is being changed and if it's already taken
-    if (email && email !== user.email) {
-      const existingUser = await Doctor.findOne({ email, _id: { $ne: id } });
-      if (existingUser) {
-        return res.status(400).json({ message: 'Email already exists' });
-      }
-    }
-
-    // Update user fields
-    user.name = name || user.name;
-    user.email = email || user.email;
-    user.specialization = specialization || user.specialization;
-    user.clinicName = clinicName || user.clinicName;
-    user.clinicAddress = clinicAddress || user.clinicAddress;
-    user.phone = phone || user.phone;
-
-    await user.save();
+    // For single-doctor context, show 1 doctor (the current one)
+    const doctorCount = 1;
+    // Count only patients and prescriptions for the current doctor
+    const patientCount = await Patient.countDocuments({ doctorId: req.doctor._id });
+    const prescriptionCount = await Prescription.countDocuments({ doctorId: req.doctor._id });
 
     res.json({
-      message: 'User updated successfully',
-      user: {
-        id: user._id,
-        username: user.username,
-        name: user.name,
-        email: user.email,
-        specialization: user.specialization,
-        clinicName: user.clinicName,
-        clinicAddress: user.clinicAddress,
-        phone: user.phone
+      doctors: doctorCount,
+      patients: patientCount,
+      prescriptions: prescriptionCount,
+      total: doctorCount + patientCount + prescriptionCount
+    });
+  } catch (error) {
+    console.error('Get data counts error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Export all data (Danger Zone)
+router.get('/export-data', auth, async (req, res) => {
+  try {
+    const doctors = await Doctor.find({}).select('-password');
+    const patients = await Patient.find({});
+    const prescriptions = await Prescription.find({});
+
+    const exportData = {
+      exportDate: new Date().toISOString(),
+      version: '1.0',
+      data: {
+        doctors,
+        patients,
+        prescriptions
+      },
+      counts: {
+        doctors: doctors.length,
+        patients: patients.length,
+        prescriptions: prescriptions.length,
+        total: doctors.length + patients.length + prescriptions.length
+      }
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="clinic-backup-${new Date().toISOString().split('T')[0]}.json"`);
+    res.json(exportData);
+  } catch (error) {
+    console.error('Export data error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Import and restore data (Danger Zone)
+router.post('/import-data', auth, async (req, res) => {
+  try {
+    const { data } = req.body;
+
+    if (!data || !data.doctors || !data.patients || !data.prescriptions) {
+      return res.status(400).json({ message: 'Invalid data format' });
+    }
+
+    // Clear existing data
+    await Doctor.deleteMany({});
+    await Patient.deleteMany({});
+    await Prescription.deleteMany({});
+
+    // Import new data
+    const importedDoctors = await Doctor.insertMany(data.doctors);
+    const importedPatients = await Patient.insertMany(data.patients);
+    const importedPrescriptions = await Prescription.insertMany(data.prescriptions);
+
+    res.json({
+      message: 'Data imported successfully',
+      imported: {
+        doctors: importedDoctors.length,
+        patients: importedPatients.length,
+        prescriptions: importedPrescriptions.length,
+        total: importedDoctors.length + importedPatients.length + importedPrescriptions.length
       }
     });
   } catch (error) {
-    console.error('Edit user error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Import data error:', error);
+    res.status(500).json({ message: 'Failed to import data' });
   }
 });
 

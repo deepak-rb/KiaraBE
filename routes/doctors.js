@@ -45,6 +45,7 @@ router.put('/profile', auth, async (req, res) => {
       name,
       email,
       specialization,
+      licenseNumber,
       clinicName,
       clinicAddress,
       phone
@@ -55,6 +56,7 @@ router.put('/profile', auth, async (req, res) => {
     if (name) doctor.name = name;
     if (email) doctor.email = email;
     if (specialization) doctor.specialization = specialization;
+    if (licenseNumber) doctor.licenseNumber = licenseNumber;
     if (clinicName) doctor.clinicName = clinicName;
     if (clinicAddress) doctor.clinicAddress = clinicAddress;
     if (phone) doctor.phone = phone;
@@ -69,6 +71,7 @@ router.put('/profile', auth, async (req, res) => {
         name: doctor.name,
         email: doctor.email,
         specialization: doctor.specialization,
+        licenseNumber: doctor.licenseNumber,
         clinicName: doctor.clinicName,
         clinicAddress: doctor.clinicAddress,
         phone: doctor.phone,
