@@ -49,6 +49,10 @@ const doctorSchema = new mongoose.Schema({
   phone: {
     type: String,
     required: true
+  },
+  requirePasswordChange: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

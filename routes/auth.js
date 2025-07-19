@@ -107,7 +107,8 @@ router.post('/login', async (req, res) => {
         clinicName: doctor.clinicName,
         clinicAddress: doctor.clinicAddress,
         phone: doctor.phone,
-        digitalSignature: doctor.digitalSignature
+        digitalSignature: doctor.digitalSignature,
+        requirePasswordChange: doctor.requirePasswordChange || false
       }
     });
   } catch (error) {
@@ -130,7 +131,8 @@ router.get('/me', auth, async (req, res) => {
         clinicName: req.doctor.clinicName,
         clinicAddress: req.doctor.clinicAddress,
         phone: req.doctor.phone,
-        digitalSignature: req.doctor.digitalSignature
+        digitalSignature: req.doctor.digitalSignature,
+        requirePasswordChange: req.doctor.requirePasswordChange || false
       }
     });
   } catch (error) {
@@ -183,6 +185,37 @@ router.post('/change-password', auth, async (req, res) => {
   }
 });
 
+// Force password change for imported users
+router.post('/force-change-password', auth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current and new passwords are required' });
+    }
+
+    const doctor = await Doctor.findById(req.doctor._id);
+    const isMatch = await doctor.comparePassword(currentPassword);
+    
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Current password is incorrect' });
+    }
+
+    // Update password and remove requirePasswordChange flag
+    doctor.password = newPassword;
+    doctor.requirePasswordChange = false;
+    await doctor.save();
+
+    res.json({ 
+      message: 'Password changed successfully. Please login with your new password.',
+      requirePasswordChange: false
+    });
+  } catch (error) {
+    console.error('Force change password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get data counts (Danger Zone)
 router.get('/data-counts', auth, async (req, res) => {
   try {
@@ -207,15 +240,25 @@ router.get('/data-counts', auth, async (req, res) => {
 // Export all data (Danger Zone)
 router.get('/export-data', auth, async (req, res) => {
   try {
-    const doctors = await Doctor.find({}).select('-password');
+    const doctors = await Doctor.find({});
     const patients = await Patient.find({});
     const prescriptions = await Prescription.find({});
+
+    // Process doctors to include default password and mark for password reset
+    const processedDoctors = doctors.map(doctor => {
+      const { password, ...doctorWithoutPassword } = doctor.toObject();
+      return {
+        ...doctorWithoutPassword,
+        password: 'Hello@123', // Default password for import
+        requirePasswordChange: true // Flag to force password change on first login
+      };
+    });
 
     const exportData = {
       exportDate: new Date().toISOString(),
       version: '1.0',
       data: {
-        doctors,
+        doctors: processedDoctors,
         patients,
         prescriptions
       },
@@ -267,16 +310,18 @@ router.post('/import-data', auth, async (req, res) => {
       patients: existingPatients.length,
       prescriptions: existingPrescriptions.length
     });
-
+    
     // Step 2: Process and validate imported data
     console.log('Processing and validating import data...');
     
-    // Process doctor data - remove _id, __v and reset digitalSignature fields to null
-    const processedDoctors = data.doctors.map(doctor => {
+    // Process doctor data - use default password and set requirePasswordChange flag
+    const processedDoctors = data.doctors.map((doctor, index) => {
       const { _id, __v, createdAt, updatedAt, ...cleanDoctor } = doctor;
+      
       return {
         ...cleanDoctor,
-        password: 'TempPassword123!', // Set a temporary password for imported doctors
+        password: 'Hello@123', // Use default password for all imported doctors
+        requirePasswordChange: true, // Force password change on first login
         digitalSignature: null // Reset digitalSignature field to null during import
       };
     });
@@ -396,15 +441,27 @@ router.post('/import-data', auth, async (req, res) => {
       if (processedDoctors.length > 0) {
         console.log(`Importing ${processedDoctors.length} doctors...`);
         console.log('First doctor sample:', JSON.stringify(processedDoctors[0], null, 2));
-        importedDoctors = await Doctor.insertMany(processedDoctors, { ordered: false });
-        console.log(`✓ Successfully imported ${importedDoctors.length} doctors`);
         
-        // Create mapping from old doctor IDs to new ones
-        data.doctors.forEach((originalDoctor, index) => {
-          if (originalDoctor._id && importedDoctors[index]) {
-            doctorIdMapping[originalDoctor._id] = importedDoctors[index]._id;
+        // Import doctors one by one to control password hashing
+        for (let i = 0; i < processedDoctors.length; i++) {
+          const doctorData = processedDoctors[i];
+          const newDoctor = new Doctor(doctorData);
+          
+          // Let the password be hashed normally since we're using a plain text default password
+          // The pre-save hook will hash 'Hello@123' automatically
+          
+          const savedDoctor = await newDoctor.save();
+          importedDoctors.push(savedDoctor);
+          
+          console.log(`Imported doctor ${i + 1}: ${savedDoctor.username} with hashed password`);
+          
+          // Create mapping from old doctor IDs to new ones
+          if (data.doctors[i] && data.doctors[i]._id) {
+            doctorIdMapping[data.doctors[i]._id] = savedDoctor._id;
           }
-        });
+        }
+        
+        console.log(`✓ Successfully imported ${importedDoctors.length} doctors`);
         console.log('Doctor ID mapping created:', doctorIdMapping);
       }
 
@@ -537,8 +594,11 @@ router.post('/import-data', auth, async (req, res) => {
         console.log('This might indicate validation or processing issues');
       }
 
+      // Prepare warning message based on password handling
+      let passwordWarning = 'All imported doctors have been assigned the default password "Hello@123" and will be required to change it on first login for security.';
+
       res.json({
-        message: 'Data imported successfully. Note: All imported doctors have been assigned the temporary password "TempPassword123!" and should change it immediately.',
+        message: 'Data imported successfully.',
         imported: {
           doctors: importedDoctors.length,
           patients: importedPatients.length,
@@ -546,7 +606,7 @@ router.post('/import-data', auth, async (req, res) => {
           total: importedDoctors.length + importedPatients.length + importedPrescriptions.length
         },
         verified: finalCounts,
-        warning: 'Imported doctors have temporary passwords and should change them immediately for security.'
+        warning: passwordWarning
       });
     } else {
       console.log('Import failed but no error was thrown - this should not happen');
