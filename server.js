@@ -14,6 +14,7 @@ console.log('Environment:', process.env.NODE_ENV);
 console.log('Port:', process.env.PORT);
 console.log('MongoDB URI exists:', !!process.env.MONGODB_URI);
 console.log('CORS Origin:', process.env.CORS_ORIGIN);
+console.log('Server starting with API routes configured...');
 
 const authRoutes = require('./routes/auth');
 const patientRoutes = require('./routes/patients');
