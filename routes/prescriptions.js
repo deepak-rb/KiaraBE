@@ -113,14 +113,51 @@ router.get('/', auth, async (req, res) => {
     // Clean up orphaned prescriptions first
     await cleanupOrphanedPrescriptions(req.doctor._id);
     
-    const prescriptions = await Prescription.find({ doctorId: req.doctor._id })
+    // Parse pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    
+    // Parse filter parameter
+    const filter = req.query.filter;
+
+    // Build query based on filter
+    let query = { doctorId: req.doctor._id };
+    
+    if (filter === 'followups') {
+      // Only get prescriptions that have a follow-up date
+      query.nextFollowUp = { $exists: true, $ne: null };
+    }
+
+    // Get total count of prescriptions for this doctor with filter applied
+    const totalPrescriptions = await Prescription.countDocuments(query);
+
+    // Get paginated prescriptions with filter applied
+    const prescriptions = await Prescription.find(query)
       .populate('patientId', 'name age phone patientId')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     // Filter out prescriptions where patient doesn't exist anymore (double check)
     const validPrescriptions = prescriptions.filter(prescription => prescription.patientId !== null);
 
-    res.json({ prescriptions: validPrescriptions });
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(totalPrescriptions / limit);
+    const hasNextPage = page < totalPages;
+    const hasPrevPage = page > 1;
+
+    res.json({ 
+      prescriptions: validPrescriptions,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalPrescriptions,
+        limit,
+        hasNextPage,
+        hasPrevPage
+      }
+    });
   } catch (error) {
     console.error('Get prescriptions error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -163,35 +200,67 @@ router.get('/patient/:patientId', auth, async (req, res) => {
 router.get('/search/:query', auth, async (req, res) => {
   try {
     const { query } = req.params;
+    console.log('🔍 Backend search for:', query);
 
-    // Clean and normalize the search query for phone numbers
-    const cleanQuery = query.replace(/[^\w\s]/g, ''); // Remove special characters
-    const phoneRegex = query.replace(/[^\d]/g, ''); // Extract only numbers for phone search
+    // Escape special regex characters to prevent regex errors
+    const escapeRegex = (string) => {
+      return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    };
 
-    // Find patients that match the phone number (try both original and cleaned versions)
-    const matchingPatients = await Patient.find({
+    const escapedQuery = escapeRegex(query);
+    
+    // Only search by phone if the query looks like a phone number (contains digits)
+    let patientIds = [];
+    const hasDigits = /\d/.test(query);
+    
+    if (hasDigits) {
+      // Clean and normalize the search query for phone numbers
+      const phoneRegex = query.replace(/[^\d]/g, ''); // Extract only numbers for phone search
+      
+      if (phoneRegex.length > 0) {
+        const matchingPatients = await Patient.find({
+          doctorId: req.doctor._id,
+          phone: { $regex: phoneRegex, $options: 'i' }
+        });
+        patientIds = matchingPatients.map(patient => patient._id);
+        console.log('📞 Matching patients by phone:', matchingPatients.length);
+      }
+    }
+
+    // Build search conditions
+    const searchConditions = [
+      { patientName: { $regex: escapedQuery, $options: 'i' } },
+      { symptoms: { $regex: escapedQuery, $options: 'i' } },
+      { prescription: { $regex: escapedQuery, $options: 'i' } },
+      { prescriptionId: { $regex: escapedQuery, $options: 'i' } }
+    ];
+
+    // Only add patient ID search if we found matching patients
+    if (patientIds.length > 0) {
+      searchConditions.push({ patientId: { $in: patientIds } });
+    }
+
+    const searchQuery = {
       doctorId: req.doctor._id,
-      $or: [
-        { phone: { $regex: query, $options: 'i' } },
-        { phone: { $regex: phoneRegex, $options: 'i' } },
-        { phone: { $regex: cleanQuery, $options: 'i' } }
-      ]
-    });
+      $or: searchConditions
+    };
 
-    const patientIds = matchingPatients.map(patient => patient._id);
+    console.log('🔍 Search conditions count:', searchConditions.length);
+    console.log('🔍 Patient IDs to search:', patientIds.length);
 
-    const prescriptions = await Prescription.find({
-      doctorId: req.doctor._id,
-      $or: [
-        { patientName: { $regex: query, $options: 'i' } },
-        { symptoms: { $regex: query, $options: 'i' } },
-        { prescription: { $regex: query, $options: 'i' } },
-        { prescriptionId: { $regex: query, $options: 'i' } },
-        { patientId: { $in: patientIds } } // Search by patient phone number
-      ]
-    })
+    const prescriptions = await Prescription.find(searchQuery)
     .populate('patientId', 'name age phone patientId')
     .sort({ createdAt: -1 });
+
+    console.log('📊 Found prescriptions:', prescriptions.length);
+
+    // Log first few results for debugging
+    if (prescriptions.length > 0) {
+      console.log('📋 Sample results:');
+      prescriptions.slice(0, 3).forEach((p, i) => {
+        console.log(`  ${i + 1}. ${p.patientName} - ${p.prescriptionId}`);
+      });
+    }
 
     res.json({ prescriptions });
   } catch (error) {

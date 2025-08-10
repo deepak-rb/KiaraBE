@@ -142,10 +142,38 @@ router.post('/', auth, upload.single('photo'), async (req, res) => {
 // Get all patients for the doctor
 router.get('/', auth, async (req, res) => {
   try {
+    // Parse pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // Get total count of patients for this doctor
+    const totalPatients = await Patient.countDocuments({ 
+      doctorId: req.doctor._id 
+    });
+
+    // Get paginated patients
     const patients = await Patient.find({ doctorId: req.doctor._id })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(totalPatients / limit);
+    const hasNextPage = page < totalPages;
+    const hasPrevPage = page > 1;
     
-    res.json({ patients });
+    res.json({ 
+      patients,
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalPatients,
+        limit,
+        hasNextPage,
+        hasPrevPage
+      }
+    });
   } catch (error) {
     console.error('Get patients error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -164,25 +192,67 @@ router.get('/search', auth, async (req, res) => {
     // Get all patients for the doctor
     const patients = await Patient.find({ doctorId: req.doctor._id });
 
-    // Configure Fuse.js for fuzzy search
+    // First try exact/regex search for better precision
+    const searchTerm = query.toLowerCase().trim();
+    const regexResults = patients.filter(patient => {
+      const name = patient.name.toLowerCase();
+      const patientId = patient.patientId.toLowerCase();
+      const phone = patient.phone?.toLowerCase() || '';
+      const emergencyName = patient.emergencyContact?.name?.toLowerCase() || '';
+      
+      // Check for exact matches or contains matches
+      return name.includes(searchTerm) || 
+             patientId.includes(searchTerm) ||
+             phone.includes(searchTerm) ||
+             emergencyName.includes(searchTerm) ||
+             // Check if search term matches multiple words (like "Rakesh Gupta")
+             searchTerm.split(' ').every(word => name.includes(word));
+    });
+
+    // If regex search finds results, use those (more precise)
+    if (regexResults.length > 0) {
+      // Sort by relevance - exact name matches first
+      regexResults.sort((a, b) => {
+        const aNameLower = a.name.toLowerCase();
+        const bNameLower = b.name.toLowerCase();
+        
+        // Exact match gets highest priority
+        if (aNameLower === searchTerm) return -1;
+        if (bNameLower === searchTerm) return 1;
+        
+        // Starts with gets second priority
+        if (aNameLower.startsWith(searchTerm)) return -1;
+        if (bNameLower.startsWith(searchTerm)) return 1;
+        
+        // Default to alphabetical
+        return aNameLower.localeCompare(bNameLower);
+      });
+      
+      return res.json({ patients: regexResults });
+    }
+
+    // If no exact matches, fall back to fuzzy search with stricter threshold
     const fuseOptions = {
       keys: [
-        { name: 'name', weight: 0.4 },
+        { name: 'name', weight: 0.5 },
         { name: 'patientId', weight: 0.3 },
-        { name: 'phone', weight: 0.2 },
-        { name: 'emergencyContact.name', weight: 0.1 }
+        { name: 'phone', weight: 0.15 },
+        { name: 'emergencyContact.name', weight: 0.05 }
       ],
-      threshold: 0.4, // Lower threshold means more strict matching
-      includeScore: true
+      threshold: 0.2, // Much stricter threshold (lower = more strict)
+      includeScore: true,
+      minMatchCharLength: 2 // Minimum characters to match
     };
 
     const fuse = new Fuse(patients, fuseOptions);
     const searchResults = fuse.search(query);
 
-    // Extract the actual patient objects
-    const results = searchResults.map(result => result.item);
+    // Filter results with good scores (score closer to 0 is better)
+    const filteredResults = searchResults
+      .filter(result => result.score < 0.3) // Only include good matches
+      .map(result => result.item);
 
-    res.json({ patients: results });
+    res.json({ patients: filteredResults });
   } catch (error) {
     console.error('Search patients error:', error);
     res.status(500).json({ message: 'Server error' });
