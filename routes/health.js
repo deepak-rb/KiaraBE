@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const router = express.Router();
 
 // Health check endpoint
-router.get('/health', (req, res) => {
+router.get('/', (req, res) => {
   const healthCheck = {
     uptime: process.uptime(),
     message: 'OK',
