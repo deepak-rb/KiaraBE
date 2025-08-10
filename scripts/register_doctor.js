@@ -2,7 +2,7 @@ const axios = require('axios');
 
 async function registerDoctor() {
   try {
-    const response = await axios.post('http://localhost:5000/api/auth/register', {
+    const response = await axios.post('https://kiarabe.onrender.com/api/auth/register', {
       username: 'bipincysp',
       email: 'bipincyalen1993@gmail.com',
       password: 'Bipincy@123',
