@@ -20,6 +20,7 @@ const patientRoutes = require('./routes/patients');
 const prescriptionRoutes = require('./routes/prescriptions');
 const doctorRoutes = require('./routes/doctors');
 const statsRoutes = require('./routes/stats');
+const healthRoutes = require('./routes/health');
 
 const app = express();
 
@@ -38,6 +39,9 @@ app.use(helmet({
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' 
     ? [
+        'https://kiara-fe.vercel.app',
+        'https://kiara-fe-deepaks-projects-5eb1830e.vercel.app',
+        'https://kiara-f015hhns0-deepaks-projects-5eb1830e.vercel.app',
         'https://kiaraclinic.xyz',
         'https://www.kiaraclinic.xyz',
         process.env.CORS_ORIGIN
@@ -127,6 +131,7 @@ const connectDB = async () => {
 connectDB();
 
 // Routes
+app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientLimiter, patientRoutes); // Apply more lenient rate limiting to patient routes
 app.use('/api/prescriptions', prescriptionLimiter, prescriptionRoutes); // Apply more lenient rate limiting to prescription routes
