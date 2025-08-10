@@ -139,6 +139,16 @@ app.use('/api/prescriptions', prescriptionLimiter, prescriptionRoutes); // Apply
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/stats', statsRoutes);
 
+// Test route
+app.get('/api', (req, res) => {
+  res.json({ 
+    message: 'Kiara Clinic API is running',
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString(),
+    cors_origin: process.env.CORS_ORIGIN
+  });
+});
+
 // Specific route for patient images with enhanced CORS
 app.get('/patient-image/:filename', (req, res) => {
   const { filename } = req.params;
