@@ -46,6 +46,16 @@ const prescriptionSchema = new mongoose.Schema({
   notes: {
     type: String,
     default: ''
+  },
+  status: {
+    type: String,
+    enum: ['active', 'follow_up_completed', 'completed'],
+    default: 'active'
+  },
+  originalPrescriptionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Prescription',
+    default: null
   }
 }, {
   timestamps: true

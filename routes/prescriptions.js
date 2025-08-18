@@ -43,7 +43,8 @@ router.post('/', auth, async (req, res) => {
       symptoms,
       prescription,
       nextFollowUp,
-      notes
+      notes,
+      originalPrescriptionId // New field for follow-up prescriptions
     } = req.body;
 
     // Validate mandatory fields
@@ -78,7 +79,8 @@ router.post('/', auth, async (req, res) => {
       prescription,
       nextFollowUp: nextFollowUp ? new Date(nextFollowUp) : null,
       digitalSignature: req.doctor.digitalSignature,
-      notes
+      notes,
+      originalPrescriptionId: originalPrescriptionId || null
     });
 
     // Generate prescription ID manually
@@ -90,6 +92,21 @@ router.post('/', auth, async (req, res) => {
     }
 
     await newPrescription.save();
+
+    // If this is a follow-up prescription, update the original prescription status
+    if (originalPrescriptionId) {
+      try {
+        await Prescription.findByIdAndUpdate(
+          originalPrescriptionId,
+          { status: 'follow_up_completed' },
+          { new: true }
+        );
+        console.log(`Updated original prescription ${originalPrescriptionId} status to follow_up_completed`);
+      } catch (updateError) {
+        console.error('Error updating original prescription status:', updateError);
+        // Don't fail the request if status update fails
+      }
+    }
 
     // Populate doctor and patient details for response
     await newPrescription.populate('doctorId', 'name specialization licenseNumber clinicName clinicAddress');
